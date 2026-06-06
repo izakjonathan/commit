@@ -8,11 +8,22 @@ Mobile-first app for committing a ZIP build directly to GitHub.
 2. Choose the ZIP file.
 3. Press **Commit ZIP to GitHub**.
 
-The GitHub owner is set to `izakjonathan` by default. The app commits to the `main` branch and uses a default commit message automatically.
+The GitHub owner is fixed to `izakjonathan`. The app commits to the `main` branch and uses a default commit message automatically.
 
-## Protected paths during replacement
+## v6 true replace mode
 
-During Full Repository Replace, the app preserves these existing repository paths unless the uploaded ZIP explicitly contains replacements for them:
+The repository is rebuilt from the ZIP contents on each commit.
+
+The new GitHub tree contains only:
+
+```text
+uploaded ZIP files
++ protected files copied from the existing repo when the ZIP does not replace them
+```
+
+Everything else in the repo is removed from the new commit.
+
+Protected paths:
 
 ```text
 .github/
@@ -20,6 +31,13 @@ During Full Repository Replace, the app preserves these existing repository path
 vercel.json
 docs/
 README.md
+```
+
+The app also blocks ZIPs with case-only duplicate paths, because Vercel/Next.js can fail on paths like:
+
+```text
+app/api/check-repo/route.js
+app/api/Check-repo/route.js
 ```
 
 ## Setup

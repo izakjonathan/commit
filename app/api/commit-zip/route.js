@@ -2,6 +2,10 @@ import { Octokit } from "@octokit/rest";
 import JSZip from "jszip";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
+
+const DEFAULT_OWNER = "izakjonathan";
+const DEFAULT_BRANCH = "main";
 
 const PRESERVE_PATHS = [
   ".github",
@@ -16,7 +20,6 @@ function isPreservedPath(path) {
     return path === preserve || path.startsWith(`${preserve}/`);
   });
 }
-export const maxDuration = 60;
 
 function cleanInput(value) {
   return String(value || "")
@@ -48,13 +51,6 @@ function isBinaryPath(path) {
   return /\.(png|jpg|jpeg|gif|webp|ico|pdf|zip|woff|woff2|ttf|otf|mp4|mov|mp3|wav|avif|heic)$/i.test(path);
 }
 
-function shouldDeletePath(filePath, deletePaths) {
-  return deletePaths.some((path) => {
-    const clean = normalizePath(path).replace(/\/$/, "");
-    return filePath === clean || filePath.startsWith(`${clean}/`);
-  });
-}
-
 function uploadPath(path, stripPrefix) {
   const clean = normalizePath(path);
   if (stripPrefix && clean.startsWith(stripPrefix + "/")) {
@@ -62,7 +58,6 @@ function uploadPath(path, stripPrefix) {
   }
   return clean;
 }
-
 
 function findCaseOnlyDuplicates(paths) {
   const seen = new Map();
@@ -81,12 +76,29 @@ function findCaseOnlyDuplicates(paths) {
   return duplicates;
 }
 
+function findPathCollisions(paths) {
+  const pathSet = new Set(paths);
+  const collisions = [];
+
+  for (const path of paths) {
+    const parts = path.split("/");
+    for (let i = 1; i < parts.length; i += 1) {
+      const parent = parts.slice(0, i).join("/");
+      if (pathSet.has(parent)) {
+        collisions.push([parent, path]);
+      }
+    }
+  }
+
+  return collisions;
+}
+
 function githubError(error, context) {
   const status = error.status ? `GitHub status ${error.status}` : "GitHub request failed";
   const message = error.response?.data?.message || error.message || "Unknown error";
   const documentation = error.response?.data?.documentation_url ? `\nDocs: ${error.response.data.documentation_url}` : "";
   const hint = error.status === 404
-    ? "Check owner, repository, branch, and token repository access."
+    ? "Check repository name, branch, and token repository access."
     : error.status === 401
       ? "Bad credentials. Check GITHUB_TOKEN in Vercel and redeploy."
       : error.status === 403
@@ -129,21 +141,15 @@ export async function POST(request) {
 
     const form = await request.formData();
 
-    const owner = cleanInput(form.get("owner") || "izakjonathan").split("/")[0];
+    const owner = DEFAULT_OWNER;
     const repo = cleanInput(form.get("repo")).split("/").filter(Boolean).at(-1);
-    const branch = cleanInput(form.get("branch") || "main");
-    const message = String(form.get("message") || "").trim();
-    const replaceMode = String(form.get("replaceMode") || "full");
+    const branch = cleanInput(form.get("branch") || DEFAULT_BRANCH);
+    const message = String(form.get("message") || "Replace project with latest ZIP build").trim();
     const stripPrefix = normalizePath(form.get("stripPrefix") || "");
-    const deletePaths = String(form.get("deletePaths") || "")
-      .split(/\r?\n/)
-      .map((x) => normalizePath(x.trim()))
-      .filter(Boolean);
-
     const zipFile = form.get("zip");
 
-    if (!owner || !repo || !branch || !message || !zipFile) {
-      return Response.json({ error: "Missing owner, repo, branch, message or ZIP." }, { status: 400 });
+    if (!repo || !branch || !message || !zipFile) {
+      return Response.json({ error: "Missing repo, branch, message or ZIP." }, { status: 400 });
     }
 
     const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
@@ -165,6 +171,16 @@ export async function POST(request) {
     }
 
     const baseTreeSha = parentCommit.data.tree.sha;
+
+    let existingTree;
+    try {
+      existingTree = await getRecursiveTree(octokit, owner, repo, baseTreeSha);
+    } catch (error) {
+      return Response.json({ error: githubError(error, "Existing repository tree lookup failed.") }, { status: error.status || 500 });
+    }
+
+    const existingBlobs = existingTree.filter((item) => item.type === "blob");
+    const existingShaByPath = new Map(existingBlobs.map((item) => [item.path, item.sha]));
 
     const zipBuffer = Buffer.from(await zipFile.arrayBuffer());
     const zip = await JSZip.loadAsync(zipBuffer);
@@ -200,79 +216,63 @@ export async function POST(request) {
       }, { status: 400 });
     }
 
-    if (replaceMode === "full" && !uploadedPaths.includes("package.json")) {
-      return Response.json({ error: "Full Repository Replace requires package.json at repository root after wrapper stripping." }, { status: 400 });
+    const pathCollisions = findPathCollisions(uploadedPaths);
+    if (pathCollisions.length) {
+      const examples = pathCollisions.slice(0, 5).map(([a, b]) => `${a}  conflicts with  ${b}`).join("\n");
+      return Response.json({
+        error: `The ZIP contains file/folder path conflicts. GitHub cannot store a file where a folder also needs to exist:\n\n${examples}`
+      }, { status: 400 });
+    }
+
+    if (!uploadedPaths.includes("package.json")) {
+      return Response.json({ error: "True Replace requires package.json at repository root after wrapper stripping." }, { status: 400 });
+    }
+
+    const uploadedSet = new Set(uploadedPaths);
+    let preservedPaths = 0;
+    let deletedPaths = 0;
+    let addedPaths = 0;
+    let updatedPaths = 0;
+    let unchangedUploadedPaths = 0;
+
+    for (const item of treeItems) {
+      const oldSha = existingShaByPath.get(item.path);
+      if (!oldSha) {
+        addedPaths += 1;
+      } else if (oldSha === item.sha) {
+        unchangedUploadedPaths += 1;
+      } else {
+        updatedPaths += 1;
+      }
+    }
+
+    for (const item of existingBlobs) {
+      if (uploadedSet.has(item.path)) continue;
+
+      if (isPreservedPath(item.path)) {
+        treeItems.push({
+          path: item.path,
+          mode: item.mode || "100644",
+          type: "blob",
+          sha: item.sha
+        });
+        preservedPaths += 1;
+      } else {
+        deletedPaths += 1;
+      }
     }
 
     let newTree;
-    let preservedPaths = 0;
-
-    if (replaceMode === "full") {
-      // Important: no base_tree. This creates a clean root tree.
-      // Protected repository files are copied from the existing tree unless the ZIP replaces them.
-      try {
-        const existingTree = await getRecursiveTree(octokit, owner, repo, baseTreeSha);
-        const uploadedSet = new Set(uploadedPaths);
-
-        for (const item of existingTree) {
-          if (
-            item.type === "blob" &&
-            isPreservedPath(item.path) &&
-            !uploadedSet.has(item.path)
-          ) {
-            treeItems.push({
-              path: item.path,
-              mode: item.mode || "100644",
-              type: "blob",
-              sha: item.sha
-            });
-            preservedPaths += 1;
-          }
-        }
-
-        newTree = await octokit.git.createTree({
-          owner,
-          repo,
-          tree: treeItems
-        });
-      } catch (error) {
-        return Response.json({ error: githubError(error, "Full replacement tree creation failed.") }, { status: error.status || 500 });
-      }
-    } else {
-      let existingTree;
-      try {
-        existingTree = await getRecursiveTree(octokit, owner, repo, baseTreeSha);
-      } catch (error) {
-        return Response.json({ error: githubError(error, "Existing tree lookup failed.") }, { status: error.status || 500 });
-      }
-
-      const uploadedSet = new Set(uploadedPaths);
-
-      for (const item of existingTree) {
-        if (
-          item.type === "blob" &&
-          shouldDeletePath(item.path, deletePaths) &&
-          !uploadedSet.has(item.path)
-        ) {
-          treeItems.push({
-            path: item.path,
-            mode: "100644",
-            type: "blob",
-            sha: null
-          });
-        }
-      }
-
-      try {
-        newTree = await octokit.git.createTree({
-          owner,
-          repo,
-          base_tree: baseTreeSha,
-          tree: treeItems
-        });
-      } catch (error) {
-        return Response.json({ error: githubError(error, "Selected replacement tree creation failed.") }, { status: error.status || 500 });
-      }
+    try {
+      // No base_tree: this is true replace mode. The new root tree contains only
+      // ZIP files plus preserved protected files copied above. Everything else disappears.
+      newTree = await octokit.git.createTree({
+        owner,
+        repo,
+        tree: treeItems
+      });
+    } catch (error) {
+      return Response.json({ error: githubError(error, "True replacement tree creation failed.") }, { status: error.status || 500 });
     }
 
     let newCommit;
@@ -301,9 +301,16 @@ export async function POST(request) {
 
     return Response.json({
       ok: true,
+      owner,
+      repo,
+      branch,
       commitSha: newCommit.data.sha,
       filesUploaded: uploadedPaths.length,
-      mode: replaceMode === "full" ? "FULL_REPOSITORY_REPLACE" : "SELECTED_PATH_REPLACE",
+      mode: "TRUE_REPLACE",
+      addedPaths,
+      updatedPaths,
+      unchangedUploadedPaths,
+      deletedPaths,
       preservedPaths,
       stripPrefix
     });

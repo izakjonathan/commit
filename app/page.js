@@ -6,7 +6,6 @@ import JSZip from "jszip";
 const DEFAULT_OWNER = "izakjonathan";
 const DEFAULT_BRANCH = "main";
 const DEFAULT_MESSAGE = "Replace project with latest ZIP build";
-const DEFAULT_DELETE = ["app", "components", "data", "public"];
 
 function cleanInput(value) {
   return String(value || "")
@@ -141,13 +140,10 @@ export default function Home() {
 
     try {
       const form = new FormData();
-      form.append("owner", normalizedOwner);
       form.append("repo", normalizedRepo);
       form.append("branch", normalizedBranch);
       form.append("message", DEFAULT_MESSAGE);
-      form.append("replaceMode", "full");
       form.append("stripPrefix", stripPrefix);
-      form.append("deletePaths", DEFAULT_DELETE.join("\n"));
       form.append("zip", zipFile);
 
       const res = await fetch("/api/commit-zip", {
@@ -159,7 +155,7 @@ export default function Home() {
       if (!res.ok) throw new Error(data.error || "Commit failed.");
 
       setStatus(
-        `SUCCESS\n\nRepository: ${normalizedOwner}/${normalizedRepo}\nBranch: ${normalizedBranch}\nCommit: ${data.commitSha}\nFiles uploaded: ${data.filesUploaded}\nMode: ${data.mode}\nProtected paths preserved: ${data.preservedPaths || 0}\nStripped wrapper: ${data.stripPrefix || "none"}\n\nVercel should deploy automatically if connected.`
+        `SUCCESS\n\nRepository: ${normalizedOwner}/${normalizedRepo}\nBranch: ${normalizedBranch}\nCommit: ${data.commitSha}\nMode: ${data.mode}\n\nAdded: ${data.addedPaths || 0}\nUpdated: ${data.updatedPaths || 0}\nUnchanged from ZIP: ${data.unchangedUploadedPaths || 0}\nDeleted from repo: ${data.deletedPaths || 0}\nProtected preserved: ${data.preservedPaths || 0}\nFiles uploaded: ${data.filesUploaded}\nStripped wrapper: ${data.stripPrefix || "none"}\n\nVercel should deploy automatically if connected.`
       );
     } catch (error) {
       setStatus(`ERROR\n\n${error.message}`);
@@ -223,7 +219,7 @@ export default function Home() {
       <section className="card">
         <h2>3. Commit</h2>
         <p>
-          This replaces the project with the ZIP contents on <b>{DEFAULT_BRANCH}</b>, while preserving protected repository files like .github, .gitignore, vercel.json, docs and README.md when they already exist.
+          True replace mode: the repo becomes the ZIP contents on <b>{DEFAULT_BRANCH}</b>. Old files are deleted unless they are protected files like .github, .gitignore, vercel.json, docs or README.md.
         </p>
         <div className="actions">
           <button disabled={busy || !zipFile || !normalizedRepo} onClick={commitZip}>
