@@ -1,4 +1,4 @@
-# GitHub ZIP Committer v7 — Git Push
+# GitHub ZIP Committer v7.0.1 — Git Push
 
 Mobile-first Next.js app that replaces a GitHub repository with a ZIP build using a real Git workflow instead of creating one GitHub REST blob per file.
 
@@ -75,3 +75,8 @@ The token must be allowed to push to the target branch. Branch protection rules 
 ## Security
 
 Keep the app private or add authentication before public deployment. The GitHub token remains server-side and must never be exposed to the browser.
+
+
+## Vercel build hotfix
+
+The Node HTTP client is imported from the public package export `isomorphic-git/http/node`. Do not append `/index.js`; modern package export maps reject that internal path during Next.js builds.
