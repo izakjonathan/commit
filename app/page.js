@@ -136,7 +136,7 @@ export default function Home() {
     }
 
     setBusy(true);
-    setStatus("Uploading ZIP and creating GitHub commit...");
+    setStatus("Cloning repository, creating one Git commit and pushing...");
 
     try {
       const form = new FormData();
@@ -155,7 +155,7 @@ export default function Home() {
       if (!res.ok) throw new Error(data.error || "Commit failed.");
 
       setStatus(
-        `SUCCESS\n\nRepository: ${normalizedOwner}/${normalizedRepo}\nBranch: ${normalizedBranch}\nCommit: ${data.commitSha}\nMode: ${data.mode}\n\nAdded: ${data.addedPaths || 0}\nUpdated: ${data.updatedPaths || 0}\nUnchanged from ZIP: ${data.unchangedUploadedPaths || 0}\nDeleted from repo: ${data.deletedPaths || 0}\nProtected preserved: ${data.preservedPaths || 0}\nFiles uploaded: ${data.filesUploaded}\nStripped wrapper: ${data.stripPrefix || "none"}\n\nVercel should deploy automatically if connected.`
+        `SUCCESS\n\nRepository: ${normalizedOwner}/${normalizedRepo}\nBranch: ${normalizedBranch}\nCommit: ${data.commitSha}\nTransport: ${data.mode}\n\nAdded: ${data.addedPaths || 0}\nUpdated: ${data.updatedPaths || 0}\nUnchanged from ZIP: ${data.unchangedUploadedPaths || 0}\nDeleted from repo: ${data.deletedPaths || 0}\nProtected preserved: ${data.preservedPaths || 0}\nFiles uploaded: ${data.filesUploaded}\nStripped wrapper: ${data.stripPrefix || "none"}\n\nVercel should deploy automatically if connected.`
       );
     } catch (error) {
       setStatus(`ERROR\n\n${error.message}`);
@@ -166,10 +166,10 @@ export default function Home() {
 
   return (
     <main>
-      <div className="kicker">ZIP → GitHub Commit</div>
-      <h1>Commit ZIP</h1>
+      <div className="kicker">ZIP → Git Push</div>
+      <h1>Push ZIP</h1>
       <p>
-        Owner is fixed to <b>{DEFAULT_OWNER}</b>. Enter the repo name, choose your ZIP and press commit.
+        Owner is fixed to <b>{DEFAULT_OWNER}</b>. Enter the repo name, choose your ZIP and push one normal Git commit.
       </p>
 
       <section className="card">
@@ -217,13 +217,13 @@ export default function Home() {
       </section>
 
       <section className="card">
-        <h2>3. Commit</h2>
+        <h2>3. Git push</h2>
         <p>
-          True replace mode: the repo becomes the ZIP contents on <b>{DEFAULT_BRANCH}</b>. Old files are deleted unless they are protected files like .github, .gitignore, vercel.json, docs or README.md.
+          Git push mode: the app shallow-clones <b>{DEFAULT_BRANCH}</b>, replaces the working tree with the ZIP, creates one commit and pushes once. Protected files remain when the ZIP does not replace them.
         </p>
         <div className="actions">
           <button disabled={busy || !zipFile || !normalizedRepo} onClick={commitZip}>
-            {busy ? "Committing..." : "Commit ZIP to GitHub"}
+            {busy ? "Pushing..." : "Push ZIP to GitHub"}
           </button>
           <button className="secondary" onClick={() => setStatus("")}>Clear status</button>
         </div>

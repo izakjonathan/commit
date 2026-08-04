@@ -1,6 +1,6 @@
 {
-  "name": "github-zip-committer-v6-true-replace",
-  "version": "1.0.6",
+  "name": "github-zip-committer-v7-git-push",
+  "version": "1.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -8,10 +8,10 @@
     "start": "next start"
   },
   "dependencies": {
-    "@octokit/rest": "^21.0.2",
     "jszip": "^3.10.1",
     "next": "^15.1.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "isomorphic-git": "^1.33.1"
   }
 }

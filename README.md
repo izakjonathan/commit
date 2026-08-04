@@ -1,27 +1,26 @@
-# GitHub ZIP Committer
+# GitHub ZIP Committer v7 — Git Push
 
-Mobile-first app for committing a ZIP build directly to GitHub.
+Mobile-first Next.js app that replaces a GitHub repository with a ZIP build using a real Git workflow instead of creating one GitHub REST blob per file.
 
-## Current workflow
+## Workflow
 
 1. Type the repository name.
 2. Choose the ZIP file.
-3. Press **Commit ZIP to GitHub**.
+3. Press **Push ZIP to GitHub**.
+4. The server shallow-clones `main` into Vercel's writable `/tmp` directory.
+5. It replaces the working tree with the ZIP while retaining protected paths not supplied by the ZIP.
+6. It creates one local commit and performs one Smart HTTP Git push.
 
-The GitHub owner is fixed to `izakjonathan`. The app commits to the `main` branch and uses a default commit message automatically.
+This mirrors the important behavior of GitHub Desktop or `git push` and avoids the REST `git.createBlob` loop that caused GitHub secondary-rate-limit failures.
 
-## v6 true replace mode
+## True replace behavior
 
-The repository is rebuilt from the ZIP contents on each commit.
-
-The new GitHub tree contains only:
+The resulting repository contains:
 
 ```text
 uploaded ZIP files
-+ protected files copied from the existing repo when the ZIP does not replace them
++ protected files from the existing repository when the ZIP does not replace them
 ```
-
-Everything else in the repo is removed from the new commit.
 
 Protected paths:
 
@@ -33,12 +32,9 @@ docs/
 README.md
 ```
 
-The app also blocks ZIPs with case-only duplicate paths, because Vercel/Next.js can fail on paths like:
+Everything else is removed in the new commit.
 
-```text
-app/api/check-repo/route.js
-app/api/Check-repo/route.js
-```
+The app rejects ZIP path traversal, case-only duplicate paths, and file/folder path collisions.
 
 ## Setup
 
@@ -48,13 +44,34 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Add your token to `.env.local`:
+Required:
 
 ```bash
 GITHUB_TOKEN=github_pat_...
+```
+
+Optional commit identity:
+
+```bash
+GITHUB_USERNAME=izakjonathan
+GIT_AUTHOR_NAME="Izak Hyllested"
+GIT_AUTHOR_EMAIL="YOUR_GITHUB_NOREPLY_EMAIL"
 ```
 
 GitHub token permissions:
 
 - Contents: Read and write
 - Metadata: Read
+
+The token must be allowed to push to the target branch. Branch protection rules can still reject the push.
+
+## Vercel constraints
+
+- Uses the Node.js runtime, not Edge.
+- Uses ephemeral writable `/tmp` storage.
+- Uses a shallow single-branch clone to minimize disk, network, and execution time.
+- The combined repository checkout and ZIP must fit within the available `/tmp` space and function duration.
+
+## Security
+
+Keep the app private or add authentication before public deployment. The GitHub token remains server-side and must never be exposed to the browser.
