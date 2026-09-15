@@ -81,7 +81,8 @@ export default function Home() {
     const total = files.reduce((sum, file) => sum + file.size, 0);
     const folders = new Set(files.map((file) => file.path.split("/")[0]).filter(Boolean));
     const hasPackageJson = files.some((file) => file.path === "package.json");
-    return { total, folders: folders.size, hasPackageJson };
+    const hasPackageLock = files.some((file) => file.path === "package-lock.json");
+    return { total, folders: folders.size, hasPackageJson, hasPackageLock };
   }, [files]);
 
   async function handleZip(file) {
@@ -130,8 +131,8 @@ export default function Home() {
       return;
     }
 
-    if (!summary.hasPackageJson) {
-      setStatus("The ZIP needs package.json at the root. If your ZIP has one wrapper folder, this app strips it automatically.");
+    if (!summary.hasPackageJson || !summary.hasPackageLock) {
+      setStatus("The ZIP needs valid package.json and package-lock.json files at the root. If it has one wrapper folder, this app strips it automatically.");
       return;
     }
 
@@ -155,7 +156,7 @@ export default function Home() {
       if (!res.ok) throw new Error(data.error || "Commit failed.");
 
       setStatus(
-        `SUCCESS\n\nRepository: ${normalizedOwner}/${normalizedRepo}\nBranch: ${normalizedBranch}\nCommit: ${data.commitSha}\nTransport: ${data.mode}\n\nAdded: ${data.addedPaths || 0}\nUpdated: ${data.updatedPaths || 0}\nUnchanged from ZIP: ${data.unchangedUploadedPaths || 0}\nDeleted from repo: ${data.deletedPaths || 0}\nProtected preserved: ${data.preservedPaths || 0}\nFiles uploaded: ${data.filesUploaded}\nStripped wrapper: ${data.stripPrefix || "none"}\n\nVercel should deploy automatically if connected.`
+        `SUCCESS\n\nRepository: ${normalizedOwner}/${normalizedRepo}\nBranch: ${normalizedBranch}\nCommit: ${data.commitSha}\nTransport: ${data.mode}\n\nAdded: ${data.addedPaths || 0}\nUpdated: ${data.updatedPaths || 0}\nUnchanged from ZIP: ${data.unchangedUploadedPaths || 0}\nDeleted from repo: ${data.deletedPaths || 0}\nFiles uploaded: ${data.filesUploaded}\nStripped wrapper: ${data.stripPrefix || "none"}\n\nThe commit tree matches the ZIP exactly. Vercel should deploy automatically if connected.`
       );
     } catch (error) {
       setStatus(`ERROR\n\n${error.message}`);
@@ -183,7 +184,7 @@ export default function Home() {
           autoCorrect="off"
           spellCheck="false"
         />
-        <small>Commits to {DEFAULT_OWNER}/{normalizedRepo || "repo-name"}:{DEFAULT_BRANCH}</small>
+        <small>Creates one non-forced commit on {DEFAULT_OWNER}/{normalizedRepo || "repo-name"}:{DEFAULT_BRANCH}</small>
       </section>
 
       <section className="card">
@@ -201,7 +202,7 @@ export default function Home() {
             <div className="stat-grid" style={{ marginTop: 14 }}>
               <div className="stat"><b>{files.length}</b><span>Files</span></div>
               <div className="stat"><b>{formatSize(summary.total)}</b><span>Total size</span></div>
-              <div className="stat"><b>{summary.hasPackageJson ? "Yes" : "No"}</b><span>package.json</span></div>
+              <div className="stat"><b>{summary.hasPackageJson && summary.hasPackageLock ? "Yes" : "No"}</b><span>Validated npm files</span></div>
             </div>
             <div className="file-list" style={{ marginTop: 14 }}>
               {files.slice(0, 250).map((file) => (
@@ -219,7 +220,7 @@ export default function Home() {
       <section className="card">
         <h2>3. Git push</h2>
         <p>
-          Git push mode: the app shallow-clones <b>{DEFAULT_BRANCH}</b>, replaces the working tree with the ZIP, creates one commit and pushes once. Protected files remain when the ZIP does not replace them.
+          Git push mode: the app shallow-clones <b>{DEFAULT_BRANCH}</b>, removes every tracked project file except Git metadata, writes the ZIP exactly, creates one commit and pushes once without force. Nothing is silently preserved from an older release.
         </p>
         <div className="actions">
           <button disabled={busy || !zipFile || !normalizedRepo} onClick={commitZip}>

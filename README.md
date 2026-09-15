@@ -1,6 +1,6 @@
-# GitHub ZIP Committer v7.0.1 — Git Push
+# GitHub ZIP Committer v7.0.2 — Exact Git Push
 
-Mobile-first Next.js app that replaces a GitHub repository with a ZIP build using a real Git workflow instead of creating one GitHub REST blob per file.
+Mobile-first Next.js app that creates one normal, non-forced Git commit from a verified ZIP build. The resulting repository tree matches the ZIP exactly.
 
 ## Workflow
 
@@ -8,33 +8,24 @@ Mobile-first Next.js app that replaces a GitHub repository with a ZIP build usin
 2. Choose the ZIP file.
 3. Press **Push ZIP to GitHub**.
 4. The server shallow-clones `main` into Vercel's writable `/tmp` directory.
-5. It replaces the working tree with the ZIP while retaining protected paths not supplied by the ZIP.
+5. It removes all current working-tree files except Git metadata, then writes the ZIP exactly.
 6. It creates one local commit and performs one Smart HTTP Git push.
 
 This mirrors the important behavior of GitHub Desktop or `git push` and avoids the REST `git.createBlob` loop that caused GitHub secondary-rate-limit failures.
 
-## True replace behavior
+## Exact replacement behavior
 
 The resulting repository contains:
 
 ```text
-uploaded ZIP files
-+ protected files from the existing repository when the ZIP does not replace them
+uploaded ZIP files only
 ```
 
-Protected paths:
+No application files are preserved from the existing repository. This prevents stale configuration—such as an old `vercel.json` Cron—from surviving a newer ZIP that intentionally omits it.
 
-```text
-.github/
-.gitignore
-vercel.json
-docs/
-README.md
-```
+The ZIP must contain valid `package.json` and `package-lock.json` at its project root. The app rejects malformed lockfiles before it creates a commit.
 
-Everything else is removed in the new commit.
-
-The app rejects ZIP path traversal, case-only duplicate paths, and file/folder path collisions.
+The app rejects ZIP path traversal, case-only duplicate paths, file/folder path collisions, and invalid npm project metadata.
 
 ## Setup
 

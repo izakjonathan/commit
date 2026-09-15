@@ -14,20 +14,6 @@ const DEFAULT_BRANCH = "main";
 const DEFAULT_AUTHOR_NAME = "GitHub ZIP Committer";
 const DEFAULT_AUTHOR_EMAIL = "github-zip-committer@users.noreply.github.com";
 
-const PRESERVE_PATHS = [
-  ".github",
-  ".gitignore",
-  "vercel.json",
-  "docs",
-  "README.md"
-];
-
-function isPreservedPath(filePath) {
-  return PRESERVE_PATHS.some((preserve) => {
-    return filePath === preserve || filePath.startsWith(`${preserve}/`);
-  });
-}
-
 function cleanInput(value) {
   return String(value || "")
     .trim()
@@ -103,23 +89,34 @@ function safeDestination(root, relativePath) {
   return destination;
 }
 
-async function removeUnprotectedWorkingFiles(dir) {
+async function removeWorkingFiles(dir) {
   const entries = await fs.promises.readdir(dir, { withFileTypes: true });
-  let preservedPaths = 0;
 
   for (const entry of entries) {
     if (entry.name === ".git") continue;
-
-    const relativePath = entry.name;
-    if (isPreservedPath(relativePath)) {
-      preservedPaths += 1;
-      continue;
-    }
-
     await fs.promises.rm(path.join(dir, entry.name), { recursive: true, force: true });
   }
+}
 
-  return preservedPaths;
+async function validateProjectFiles(dir) {
+  const packagePath = path.join(dir, "package.json");
+  const lockPath = path.join(dir, "package-lock.json");
+
+  try {
+    JSON.parse(await fs.promises.readFile(packagePath, "utf8"));
+  } catch {
+    throw new Error("package.json must be valid JSON.");
+  }
+
+  try {
+    const lock = JSON.parse(await fs.promises.readFile(lockPath, "utf8"));
+    if (!Number.isInteger(lock.lockfileVersion) || lock.lockfileVersion < 1) {
+      throw new Error("package-lock.json does not contain a supported lockfileVersion.");
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("supported lockfileVersion")) throw error;
+    throw new Error("package-lock.json must be present and valid JSON. Create the ZIP from a verified npm project.");
+  }
 }
 
 function gitError(error, context) {
@@ -183,9 +180,7 @@ export async function POST(request) {
       return Response.json({ error: gitError(error, "Repository clone failed before commit.") }, { status: error.statusCode || 500 });
     }
 
-    const previousFiles = await git.listFiles({ fs, dir: workDir, ref: "HEAD" });
-    const previousSet = new Set(previousFiles);
-    const preservedRoots = await removeUnprotectedWorkingFiles(workDir);
+    await removeWorkingFiles(workDir);
 
     const zipBuffer = Buffer.from(await zipFile.arrayBuffer());
     const zip = await JSZip.loadAsync(zipBuffer);
@@ -219,8 +214,8 @@ export async function POST(request) {
       }, { status: 400 });
     }
 
-    if (!uploadedPaths.includes("package.json")) {
-      return Response.json({ error: "True Replace requires package.json at repository root after wrapper stripping." }, { status: 400 });
+    if (!uploadedPaths.includes("package.json") || !uploadedPaths.includes("package-lock.json")) {
+      return Response.json({ error: "A verified replacement ZIP requires package.json and package-lock.json at repository root after wrapper stripping." }, { status: 400 });
     }
 
     for (const [relativePath, entry] of Object.entries(zip.files)) {
@@ -233,14 +228,9 @@ export async function POST(request) {
       await fs.promises.writeFile(destination, Buffer.from(await entry.async("uint8array")));
     }
 
-    const uploadedSet = new Set(uploadedPaths);
-    const finalUploadedPaths = new Set(uploadedPaths);
+    await validateProjectFiles(workDir);
 
-    for (const previousPath of previousFiles) {
-      if (!uploadedSet.has(previousPath) && isPreservedPath(previousPath)) {
-        finalUploadedPaths.add(previousPath);
-      }
-    }
+    const uploadedSet = new Set(uploadedPaths);
 
     const statusMatrix = await git.statusMatrix({ fs, dir: workDir });
     let addedPaths = 0;
@@ -270,12 +260,11 @@ export async function POST(request) {
         branch,
         commitSha: currentSha,
         filesUploaded: uploadedPaths.length,
-        mode: "GIT_PUSH_NO_CHANGES",
+        mode: "EXACT_GIT_PUSH_NO_CHANGES",
         addedPaths,
         updatedPaths,
         unchangedUploadedPaths,
         deletedPaths,
-        preservedPaths: finalUploadedPaths.size - uploadedPaths.length,
         stripPrefix
       });
     }
@@ -312,13 +301,11 @@ export async function POST(request) {
       branch,
       commitSha,
       filesUploaded: uploadedPaths.length,
-      mode: "SMART_HTTP_GIT_PUSH",
+      mode: "EXACT_NON_FORCED_GIT_PUSH",
       addedPaths,
       updatedPaths,
       unchangedUploadedPaths,
       deletedPaths,
-      preservedPaths: Math.max(0, finalUploadedPaths.size - uploadedPaths.length),
-      preservedRoots,
       stripPrefix
     });
   } catch (error) {
