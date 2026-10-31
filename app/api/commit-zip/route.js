@@ -5,9 +5,10 @@ import crypto from "node:crypto";
 import git from "isomorphic-git";
 import http from "isomorphic-git/http/node";
 import JSZip from "jszip";
+import { restoreZip, validateChunks } from "../../../lib/zip-upload.mjs";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 const DEFAULT_OWNER = "izakjonathan";
 const DEFAULT_BRANCH = "main";
@@ -147,16 +148,21 @@ export async function POST(request) {
       return Response.json({ error: "Missing GITHUB_TOKEN." }, { status: 500 });
     }
 
-    const form = await request.formData();
+    const body = await request.json();
     const owner = DEFAULT_OWNER;
-    const repo = cleanInput(form.get("repo")).split("/").filter(Boolean).at(-1);
-    const branch = cleanInput(form.get("branch") || DEFAULT_BRANCH);
-    const message = String(form.get("message") || "Replace project with latest ZIP build").trim();
-    const stripPrefix = normalizePath(form.get("stripPrefix") || "");
-    const zipFile = form.get("zip");
-
-    if (!repo || !branch || !message || !zipFile) {
-      return Response.json({ error: "Missing repo, branch, message or ZIP." }, { status: 400 });
+    const repo = cleanInput(body.repo).split("/").filter(Boolean).at(-1);
+    const branch = cleanInput(body.branch || DEFAULT_BRANCH);
+    const message = String(body.message || "Replace project with latest ZIP build").trim();
+    const stripPrefix = normalizePath(body.stripPrefix || "");
+    if (!repo || !branch || !message) {
+      return Response.json({ error: "Missing repo, branch or message." }, { status: 400 });
+    }
+    let zipBuffer;
+    try {
+      validateChunks(repo, body.chunks, body.size);
+      zipBuffer = await restoreZip(repo, body.chunks, body.size);
+    } catch (error) {
+      return Response.json({ error: error.message }, { status: 400 });
     }
 
     workDir = path.join(os.tmpdir(), `github-zip-${crypto.randomUUID()}`);
@@ -182,7 +188,6 @@ export async function POST(request) {
 
     await removeWorkingFiles(workDir);
 
-    const zipBuffer = Buffer.from(await zipFile.arrayBuffer());
     const zip = await JSZip.loadAsync(zipBuffer);
     const uploadedPaths = [];
 

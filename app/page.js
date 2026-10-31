@@ -2,10 +2,17 @@
 
 import { useMemo, useState } from "react";
 import JSZip from "jszip";
+import { MAX_ZIP_BYTES, CHUNK_BYTES } from "../lib/upload-limits.mjs";
 
 const DEFAULT_OWNER = "izakjonathan";
 const DEFAULT_BRANCH = "main";
 const DEFAULT_MESSAGE = "Replace project with latest ZIP build";
+
+async function readResponse(response) {
+  const text = await response.text();
+  try { return JSON.parse(text); }
+  catch { throw new Error(`Request failed (${response.status}). Please retry the upload.`); }
+}
 
 function cleanInput(value) {
   return String(value || "")
@@ -86,12 +93,16 @@ export default function Home() {
   }, [files]);
 
   async function handleZip(file) {
-    setZipFile(file || null);
+    setZipFile(null);
     setFiles([]);
     setStripPrefix("");
     setStatus("");
 
     if (!file) return;
+    if (file.size > MAX_ZIP_BYTES) {
+      setStatus("ZIP files must be 50 MB or smaller.");
+      return;
+    }
 
     try {
       const zip = await JSZip.loadAsync(file);
@@ -120,6 +131,7 @@ export default function Home() {
         .sort((a, b) => a.path.localeCompare(b.path));
 
       setFiles(next);
+      setZipFile(file);
     } catch (error) {
       setStatus(`Could not read ZIP: ${error.message}`);
     }
@@ -140,19 +152,28 @@ export default function Home() {
     setStatus("Cloning repository, creating one Git commit and pushing...");
 
     try {
-      const form = new FormData();
-      form.append("repo", normalizedRepo);
-      form.append("branch", normalizedBranch);
-      form.append("message", DEFAULT_MESSAGE);
-      form.append("stripPrefix", stripPrefix);
-      form.append("zip", zipFile);
-
+      const chunks = [];
+      const count = Math.ceil(zipFile.size / CHUNK_BYTES);
+      for (let i = 0; i < count; i++) {
+        setStatus(`Uploading ZIP: ${Math.round(i / count * 100)}% (${i + 1}/${count})`);
+        const response = await fetch(`/api/upload-chunk?repo=${encodeURIComponent(normalizedRepo)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/octet-stream" },
+          body: zipFile.slice(i * CHUNK_BYTES, (i + 1) * CHUNK_BYTES)
+        });
+        const result = await readResponse(response);
+        if (!response.ok) throw new Error(result.error || "ZIP upload failed. Please retry.");
+        chunks.push(result);
+      }
+      setStatus("ZIP uploaded: 100%. Verifying ZIP, cloning repository and pushing one commit...");
       const res = await fetch("/api/commit-zip", {
         method: "POST",
-        body: form
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repo: normalizedRepo, branch: normalizedBranch,
+          message: DEFAULT_MESSAGE, stripPrefix, chunks, size: zipFile.size })
       });
 
-      const data = await res.json();
+      const data = await readResponse(res);
       if (!res.ok) throw new Error(data.error || "Commit failed.");
 
       setStatus(
@@ -177,6 +198,7 @@ export default function Home() {
         <h2>1. Repository</h2>
         <label>Repository name</label>
         <input
+          disabled={busy}
           value={repo}
           onChange={(e) => setRepo(e.target.value)}
           placeholder="portfolio2"
@@ -189,7 +211,8 @@ export default function Home() {
 
       <section className="card">
         <h2>2. ZIP</h2>
-        <input type="file" accept=".zip,application/zip" onChange={(e) => handleZip(e.target.files?.[0])} />
+        <input disabled={busy} type="file" accept=".zip,application/zip" onChange={(e) => handleZip(e.target.files?.[0])} />
+        <small>ZIP files up to 50 MB. Upload progress is shown below.</small>
 
         {stripPrefix && (
           <div className="warning" style={{ marginTop: 14 }}>

@@ -6,7 +6,9 @@ Mobile-first Next.js app that creates one normal, non-forced Git commit from a v
 
 1. Type the repository name.
 2. Choose the ZIP file.
-3. Press **Push ZIP to GitHub**.
+3. Press **Push ZIP to GitHub**. ZIP files up to 50 MB (50 × 1024 × 1024 bytes) are supported.
+   The browser sends sequential 2 MB binary chunks. Each is stored as an unreferenced Git blob in the destination repository, using the existing server-side token. Signed, expiring receipts bind each chunk to its repository and size. The final request contains only receipts; the server retrieves and verifies the chunks before cloning. No chunk files, staging branches or extra commits appear in the repository tree.
+   Unreferenced objects are subject to GitHub's garbage collection; do not treat them as durable storage. Failed uploads can be retried from the beginning.
 4. The server shallow-clones `main` into Vercel's writable `/tmp` directory.
 5. It removes all current working-tree files except Git metadata, then writes the ZIP exactly.
 6. It creates one local commit and performs one Smart HTTP Git push.
@@ -59,6 +61,10 @@ The token must be allowed to push to the target branch. Branch protection rules 
 ## Vercel constraints
 
 - Uses the Node.js runtime, not Edge.
+- Upload requests stay below the 4.5 MB function payload cap; the ZIP is never sent in one request.
+- Allows up to 300 seconds for reconstruction, clone and push.
+- Uses the existing GITHUB_TOKEN only; no Blob store or extra environment variables are needed.
+- Each full 50 MB upload uses 25 Git blob writes and 25 reads, in addition to the normal Git clone/push. GitHub rate limits can still reject repeated uploads.
 - Uses ephemeral writable `/tmp` storage.
 - Uses a shallow single-branch clone to minimize disk, network, and execution time.
 - The combined repository checkout and ZIP must fit within the available `/tmp` space and function duration.
