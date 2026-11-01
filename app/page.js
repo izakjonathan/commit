@@ -1,12 +1,38 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import JSZip from "jszip";
 import { MAX_ZIP_BYTES, CHUNK_BYTES } from "../lib/upload-limits.mjs";
 
 const DEFAULT_OWNER = "izakjonathan";
 const DEFAULT_BRANCH = "main";
 const DEFAULT_MESSAGE = "Replace project with latest ZIP build";
+
+const RECENT_REPOS_KEY = "github-zip-committer:recent-repos:v1";
+
+function repositoryName(value) {
+  const parts = cleanInput(value).split("/").filter(Boolean);
+  const name = (parts[0]?.toLowerCase() === DEFAULT_OWNER.toLowerCase()
+    ? parts[1] : parts[0])?.replace(/\.git$/i, "") || "";
+  return /^[A-Za-z0-9_.-]+$/.test(name) && name !== "." && name !== ".." ? name : "";
+}
+
+function normalizeRecentRepos(values) {
+  if (!Array.isArray(values)) return [];
+  const names = [];
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const name = repositoryName(value);
+    if (name && !names.some((existing) => existing.toLowerCase() === name.toLowerCase())) names.push(name);
+    if (names.length === 3) break;
+  }
+  return names;
+}
+
+function readRecentRepos() {
+  try { return normalizeRecentRepos(JSON.parse(window.localStorage.getItem(RECENT_REPOS_KEY) || "[]")); }
+  catch { return []; }
+}
 
 async function readResponse(response) {
   const text = await response.text();
@@ -74,6 +100,23 @@ function formatSize(bytes) {
 
 export default function Home() {
   const [repo, setRepo] = useState("");
+  const [recentRepos, setRecentRepos] = useState([]);
+
+  useEffect(() => {
+    setRecentRepos(readRecentRepos());
+    function syncHistory(event) {
+      if (event.key === RECENT_REPOS_KEY || event.key === null) setRecentRepos(readRecentRepos());
+    }
+    window.addEventListener("storage", syncHistory);
+    return () => window.removeEventListener("storage", syncHistory);
+  }, []);
+
+  function rememberRepository(name) {
+    const next = normalizeRecentRepos([name, ...readRecentRepos(), ...recentRepos]);
+    setRecentRepos(next);
+    try { window.localStorage.setItem(RECENT_REPOS_KEY, JSON.stringify(next)); }
+    catch { /* Shortcuts still work for this session if storage is unavailable. */ }
+  }
   const [zipFile, setZipFile] = useState(null);
   const [files, setFiles] = useState([]);
   const [stripPrefix, setStripPrefix] = useState("");
@@ -81,7 +124,7 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
 
   const normalizedOwner = DEFAULT_OWNER;
-  const normalizedRepo = cleanInput(repo).split("/").filter(Boolean).at(-1) || "";
+  const normalizedRepo = repositoryName(repo);
   const normalizedBranch = DEFAULT_BRANCH;
 
   const summary = useMemo(() => {
@@ -175,6 +218,7 @@ export default function Home() {
 
       const data = await readResponse(res);
       if (!res.ok) throw new Error(data.error || "Commit failed.");
+      rememberRepository(normalizedRepo);
 
       setStatus(
         `SUCCESS\n\nRepository: ${normalizedOwner}/${normalizedRepo}\nBranch: ${normalizedBranch}\nCommit: ${data.commitSha}\nTransport: ${data.mode}\n\nAdded: ${data.addedPaths || 0}\nUpdated: ${data.updatedPaths || 0}\nUnchanged from ZIP: ${data.unchangedUploadedPaths || 0}\nDeleted from repo: ${data.deletedPaths || 0}\nFiles uploaded: ${data.filesUploaded}\nStripped wrapper: ${data.stripPrefix || "none"}\n\nThe commit tree matches the ZIP exactly. Vercel should deploy automatically if connected.`
@@ -196,12 +240,34 @@ export default function Home() {
 
       <section className="card">
         <h2>1. Repository</h2>
-        <label>Repository name</label>
+        <div style={{ marginBottom: 16 }}>
+          <label>Recent repositories</label>
+          {recentRepos.length ? (
+            <div className="actions" role="group" aria-label="Recent repositories" style={{ marginTop: 0 }}>
+              {recentRepos.map((name) => (
+                <button
+                  key={name.toLowerCase()}
+                  type="button"
+                  className={normalizedRepo.toLowerCase() === name.toLowerCase() ? undefined : "secondary"}
+                  disabled={busy}
+                  aria-pressed={normalizedRepo.toLowerCase() === name.toLowerCase()}
+                  onClick={() => setRepo(name)}
+                >
+                  {name}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <small>Your last three successful ZIP commits will appear here on this device.</small>
+          )}
+        </div>
+        <label htmlFor="repository-name">Repository name (or type manually)</label>
         <input
+          id="repository-name"
           disabled={busy}
           value={repo}
           onChange={(e) => setRepo(e.target.value)}
-          placeholder="portfolio2"
+          placeholder="blaa"
           autoCapitalize="none"
           autoCorrect="off"
           spellCheck="false"
