@@ -234,15 +234,12 @@ export default function Home() {
     <main>
       <div className="kicker">ZIP → Git Push</div>
       <h1>Push ZIP</h1>
-      <p>
-        Owner is fixed to <b>{DEFAULT_OWNER}</b>. Enter the repo name, choose your ZIP and push one normal Git commit.
-      </p>
 
       <section className="card">
         <h2>1. Repository</h2>
-        <div style={{ marginBottom: 16 }}>
-          <label>Recent repositories</label>
-          {recentRepos.length ? (
+        {recentRepos.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <label>Recent repositories</label>
             <div className="actions" role="group" aria-label="Recent repositories" style={{ marginTop: 0 }}>
               {recentRepos.map((name) => (
                 <button
@@ -257,10 +254,8 @@ export default function Home() {
                 </button>
               ))}
             </div>
-          ) : (
-            <small>Your last three successful ZIP commits will appear here on this device.</small>
-          )}
-        </div>
+          </div>
+        )}
         <label htmlFor="repository-name">Repository name (or type manually)</label>
         <input
           id="repository-name"
@@ -308,9 +303,6 @@ export default function Home() {
 
       <section className="card">
         <h2>3. Git push</h2>
-        <p>
-          Git push mode: the app shallow-clones <b>{DEFAULT_BRANCH}</b>, removes every tracked project file except Git metadata, writes the ZIP exactly, creates one commit and pushes once without force. Nothing is silently preserved from an older release.
-        </p>
         <div className="actions">
           <button disabled={busy || !zipFile || !normalizedRepo} onClick={commitZip}>
             {busy ? "Pushing..." : "Push ZIP to GitHub"}
